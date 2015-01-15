@@ -57,6 +57,7 @@ func storeCspReport(report CspReport) {
 // JsonReceiverHandler receives JSON from a request body
 // TODO: Validate the JSON
 func JsonReceiverHandler(w http.ResponseWriter, req *http.Request) {
+	var err error
 	var newCspReport CspReport
 
 	if req.Method != "POST" {
@@ -65,8 +66,14 @@ func JsonReceiverHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	body, _ := ioutil.ReadAll(req.Body)
-	err := json.Unmarshal(body, &newCspReport)
+	body, err := ioutil.ReadAll(req.Body)
+
+	if err != nil {
+		http.Error(w, "Error reading request body", http.StatusBadRequest)
+		return
+	}
+
+	err = json.Unmarshal(body, &newCspReport)
 
 	if err != nil {
 		http.Error(w, "Error parsing JSON", http.StatusBadRequest)
