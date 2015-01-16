@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"net/http"
+	"regexp"
 	"time"
 
 	"labix.org/v2/mgo"
@@ -26,6 +27,40 @@ type CspDetails struct {
 	BlockedUri        string `json:"blocked-uri" bson:"blocked_uri"`
 	ViolatedDirective string `json:"violated-directive" bson:"violated_directive"`
 	OriginalPolicy    string `json:"original-policy" bson:"original_policy"`
+}
+
+func (details CspDetails) IsValid() bool {
+	minimumLength := 1
+	maximumLength := 200
+	govukRegex := `^https://www\.gov\.uk/[^\s]*$`
+
+	if len(details.DocumentUri) < minimumLength || len(details.DocumentUri) > maximumLength {
+		return false
+	}
+
+	isGovukUrl, _ := regexp.MatchString(govukRegex, details.DocumentUri)
+
+	if isGovukUrl == false {
+		return false
+	}
+
+	if len(details.Referrer) > maximumLength {
+		return false
+	}
+
+	if len(details.BlockedUri) < minimumLength || len(details.BlockedUri) > maximumLength {
+		return false
+	}
+
+	if len(details.ViolatedDirective) < minimumLength || len(details.ViolatedDirective) > maximumLength {
+		return false
+	}
+
+	if len(details.OriginalPolicy) < minimumLength || len(details.OriginalPolicy) > maximumLength {
+		return false
+	}
+
+	return true
 }
 
 func getMgoSession() *mgo.Session {
@@ -55,7 +90,6 @@ func storeCspReport(report CspReport) {
 }
 
 // JsonReceiverHandler receives JSON from a request body
-// TODO: Validate the JSON
 func JsonReceiverHandler(w http.ResponseWriter, req *http.Request) {
 	var err error
 	var newCspReport CspReport
@@ -81,6 +115,11 @@ func JsonReceiverHandler(w http.ResponseWriter, req *http.Request) {
 	}
 
 	newCspReport.ReportTime = time.Now().UTC()
+
+	if !newCspReport.Details.IsValid() {
+		http.Error(w, "Unable to validate JSON", http.StatusBadRequest)
+		return
+	}
 
 	go storeCspReport(newCspReport)
 
