@@ -3,10 +3,11 @@ package main
 import (
 	"encoding/json"
 	"io/ioutil"
+	"log"
 	"net/http"
-	"regexp"
 	"time"
 
+	"gopkg.in/validator.v2"
 	"labix.org/v2/mgo"
 )
 
@@ -21,46 +22,17 @@ type CspReport struct {
 	ReportTime time.Time  `bson:"date_time"`
 }
 
+// - DocumentUri: a GOV.UK preview, staging or production URL
+// - Referrer, BlockedUri: may be blank
+// - ViolatedDirective, OriginalPolicy: one or more CSP policies which can
+//   at their most complex contain these characters:
+//     default-src: 'self' https://0.example.com *.gov.uk;
 type CspDetails struct {
-	DocumentUri       string `json:"document-uri" bson:"document_uri"`
-	Referrer          string `json:"referrer" bson:"referrer"`
-	BlockedUri        string `json:"blocked-uri" bson:"blocked_uri"`
-	ViolatedDirective string `json:"violated-directive" bson:"violated_directive"`
-	OriginalPolicy    string `json:"original-policy" bson:"original_policy"`
-}
-
-func (details CspDetails) IsValid() bool {
-	minimumLength := 1
-	maximumLength := 200
-	govukRegex := `^https://www\.gov\.uk/[^\s]*$`
-
-	if len(details.DocumentUri) < minimumLength || len(details.DocumentUri) > maximumLength {
-		return false
-	}
-
-	isGovukUrl, _ := regexp.MatchString(govukRegex, details.DocumentUri)
-
-	if isGovukUrl == false {
-		return false
-	}
-
-	if len(details.Referrer) > maximumLength {
-		return false
-	}
-
-	if len(details.BlockedUri) < minimumLength || len(details.BlockedUri) > maximumLength {
-		return false
-	}
-
-	if len(details.ViolatedDirective) < minimumLength || len(details.ViolatedDirective) > maximumLength {
-		return false
-	}
-
-	if len(details.OriginalPolicy) < minimumLength || len(details.OriginalPolicy) > maximumLength {
-		return false
-	}
-
-	return true
+	DocumentUri       string `json:"document-uri" bson:"document_uri" validate:"min=1,max=200,regexp=^https://www(\\.preview\\.alphagov\\.co|-origin\\.production\\.alphagov\\.co|\\.gov)\\.uk/[^\\s]*$"`
+	Referrer          string `json:"referrer" bson:"referrer" validate:"max=200"`
+	BlockedUri        string `json:"blocked-uri" bson:"blocked_uri" validate:"max=200"`
+	ViolatedDirective string `json:"violated-directive" bson:"violated_directive" validate:"min=1,max=200,regexp=^[a-z0-9 '/\\*\\.:;-]+$"`
+	OriginalPolicy    string `json:"original-policy" bson:"original_policy" validate:"min=1,max=200"`
 }
 
 func getMgoSession() *mgo.Session {
@@ -116,7 +88,9 @@ func JsonReceiverHandler(w http.ResponseWriter, req *http.Request) {
 
 	newCspReport.ReportTime = time.Now().UTC()
 
-	if !newCspReport.Details.IsValid() {
+	if validationError := validator.Validate(newCspReport); validationError != nil {
+		log.Println("Request failed validation:", validationError)
+		log.Println("Failed with report:", newCspReport)
 		http.Error(w, "Unable to validate JSON", http.StatusBadRequest)
 		return
 	}
